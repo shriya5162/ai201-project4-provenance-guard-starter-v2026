@@ -42,63 +42,87 @@ Two things worth knowing before you pick numbers:
   a **miss**.
 
 ---
-## 1.
+## 1. False positives on human writing
 
-<!-- Your criterion. It must name a number. -->
-
-
+Of 10 pieces of human writing (5 I wrote myself and 5 written plainly: short
+sentences, everyday vocabulary, the way a second-language writer or a student
+might write), **at most 1** is labeled high-confidence AI, on every one of the
+three trials.
 
 **Why this target:**
 
-
+On a writing site, a wrong accusation costs the writer far more than a missed
+detection costs the site, so this is the error I hold tightest. I included
+plain writing on purpose: both of my signals read common words in even
+sentences as AI-like, so these are the writers most likely to be accused. A
+target tested only on my own prose would be too easy.
 
 ---
 
-## 2.
+## 2. Score spread between clear cases
 
-<!-- Your criterion. -->
-
-
+Across 5 clearly AI-generated texts and 5 clearly human texts, the **average
+combined score of the AI texts is at least 0.30 higher** than the average of
+the human texts, and **no clearly-AI text scores below any clearly-human
+text**, on every trial.
 
 **Why this target:**
 
-
+If the clear cases don't separate, no choice of thresholds can make the labels
+mean anything, and the uncertain cases have no chance. 0.30 is the width of
+the default unsure band (0.35–0.65). A smaller gap means clear AI and clear
+human text could land on either side of the same band. The no-overlap rule
+stops one extreme pair from hiding a muddled middle in the average.
 
 ---
 
-## 3.
+## 3. Every label is reachable, and borderline text lands in the middle
 
-<!-- Your criterion. -->
-
-
+On a 15-input test set (5 clearly human, 5 clearly AI, and 5 borderline: AI
+text I've lightly edited by hand), **each of the three labels is produced at
+least twice**, and **at least 3 of the 5 borderline inputs are labeled
+unsure**, on every trial.
 
 **Why this target:**
 
-
+A label no input can reach is a gap in my ranges, and the config notes that a
+weighted average can get stuck in the middle of the scale. "Reachable once"
+could be a fluke of one input, so I ask for twice. Lightly edited AI is the
+case where saying "we're not sure" is the honest answer, so most of it should
+land there and not in a confident verdict either way.
 
 ---
 
-## 4.
+## 4. The appeal path
 
-<!-- Your criterion. -->
-
-
+For 5 appeals on real `content_id`s, **5 of 5** return 200, and each appealed
+item has an `under_review` entry in the log after its original decision, with
+the original decision still in place. For 3 appeals on made-up ids, **3 of 3**
+return 404 and add no `under_review` entry.
 
 **Why this target:**
 
-
+The appeal is the only thing standing between a wrong accusation and nothing,
+so "most of the time" isn't good enough. One silent failure is a writer who
+thinks they've been heard and hasn't. The made-up-id half checks the failure
+the brief warns about: a typo that fails silently and looks like success.
 
 ---
 
-## 5.
+## 5. Bad input never crashes the service
 
-<!-- Your criterion. -->
-
-
+Of 6 malformed `/submit` requests (no `text`, empty `text`, whitespace-only
+`text`, a one-word `text`, 50,000 characters of text, and a body that isn't a
+JSON object), **6 of 6** get a 4xx response with an `error` code, **0** get a
+500, and **6 of 6** leave a `rejected` entry in the audit log.
 
 **Why this target:**
 
-
+A crash on malformed input is one of the most common real failures, and next
+unit's attack set will send exactly these. It has to be all six, because one
+500 means someone can knock the service over on purpose. Logging the
+rejections matters because an attack that shows up only as an absence can
+never be found afterwards.
 
 ---
 

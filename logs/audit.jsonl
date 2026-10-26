@@ -1,0 +1,9 @@
+{"timestamp": "2026-10-26T16:09:24+00:00", "content_id": "5ae28873-e364-4d16-84d0-e5620542f6f9", "creator_id": "shriya", "guess": "unsure", "model_score": 0.8356, "style_score": null, "combined_score": null, "label": "PLACEHOLDER — label comes in Milestone 5.", "status": "decided"}
+{"timestamp": "2026-10-26T16:09:24+00:00", "creator_id": "shriya", "event": "rejected", "status": "rejected", "reason": "missing_text"}
+{"timestamp": "2026-10-26T16:09:24+00:00", "creator_id": "shriya", "event": "rejected", "status": "rejected", "reason": "empty_text"}
+{"timestamp": "2026-10-26T16:09:24+00:00", "creator_id": "shriya", "event": "rejected", "status": "rejected", "reason": "text_too_short"}
+{"timestamp": "2026-10-26T16:09:24+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "invalid_json"}
+{"timestamp": "2026-10-26T16:09:24+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "missing_creator_id"}
+{"timestamp": "2026-10-26T16:09:25+00:00", "creator_id": "shriya", "event": "rejected", "status": "rejected", "reason": "text_too_long"}
+{"timestamp": "2026-10-26T16:09:34+00:00", "content_id": "f616314e-4d12-44e4-9fc9-9081d5568257", "creator_id": "shriya", "guess": "unsure", "model_score": 0.216, "style_score": null, "combined_score": null, "label": "PLACEHOLDER — label comes in Milestone 5.", "status": "decided"}
+{"timestamp": "2026-10-26T16:09:34+00:00", "creator_id": "shriya", "event": "rejected", "status": "rejected", "reason": "missing_text"}
