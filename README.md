@@ -623,19 +623,207 @@ non-Latin script would be accused with near certainty.
 
 <!-- Your five criteria across three trials. `run_eval.py --label before`. -->
 
+`python run_eval.py --label before` (criteria 1, 2, 3 and five of criterion
+5's six cases), then `python run_checks.py --label before` (criterion 4, the
+sixth bad-input case, and the log check for criterion 5). `run_eval.py` only
+sends dict bodies to `/submit`, so the appeal path and a non-object body
+needed their own script. Reports: `results/run_2026-11-01_1320_before.md` and
+`results/checks_2026-11-01_1320_before.md`. Inputs are in `scenarios.py`.
+
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |
+| 1. Human writing labeled high-confidence AI | ≤ 1 of 10 | 0/10 | 0/10 | 0/10 | MET* |
+| 2. Score spread, clear AI vs clear human | AI average ≥ 0.30 above human, no overlap | gap 0.328; lowest AI 0.674 > highest human 0.534 | same | same | MET |
+| 3. Every label reachable, borderline lands unsure | each label ≥ 2 of 15; ≥ 3 of 5 edited AI unsure | human 1, unsure 9, ai 5; edited 3/5 | same | same | MISSED |
+| 4. Appeal path | 5 of 5 real appeals recorded; 3 of 3 made-up ids → 404 | 5/5, 3/3 | 5/5, 3/3 | 5/5, 3/3 | MET |
+| 5. Bad input never crashes | 6 of 6 → 4xx, 0 × 500, 6 of 6 logged | 6/6, 0, 6/6 | 6/6, 0, 6/6 | 6/6, 0, 6/6 | MET |
+
+All three trials are identical, as expected: neither signal is random, so the
+same input gives the same score every time.
+
+\* **Criterion 1 caveat:** the target says "5 pieces I wrote myself and 5
+written plainly." In this run all ten are real human writing, r/books
+comments from my TakeMeter dataset, standing in for my own. The five
+plainest went in as the "plain" half. None was labeled AI, but 9 of 10 landed
+in unsure, not human. So the attack set's FP03 (non-native, very plain, 0.736
+→ AI) is a harder case than anything in this set. This criterion should be
+re-run with my own writing in `scenarios.py`.
+
+**How the numbers were worked out:**
+- **Criterion 2:** the combined score is `scoring.combine_signals(model_score, style_score)`, applied to the two signal scores in the run report.
+- **Criterion 3:** counts labels over criterion 2's ten inputs plus criterion 3's five edited ones. The `human` label came up only once in 15, so it's reachable but not twice.
 
 **Real output from one trial**, pasted as text, naming the file and function
 that produced it:
 
-```json
+*Criterion 1* — `run_eval.py::main`, `results/run_2026-11-01_1320_before.md`,
+scenario "c1 human writing", trial 1, three of the ten entries:
 
+```json
+[
+  {
+    "status": 200,
+    "guess": "unsure",
+    "confidence": 0.8672,
+    "model_score": 0.5875,
+    "style_score": 0.5348,
+    "label": "We can't tell whether this was written by a person or with AI help. This isn't a judgement about you or your work, and nothing has been flagged.",
+    "sent": "For me, Henry James is black licorice. I get why people love him. Inte"
+  },
+  {
+    "status": 200,
+    "guess": "unsure",
+    "confidence": 0.9576,
+    "model_score": 0.5785,
+    "style_score": 0.4352,
+    "label": "We can't tell whether this was written by a person or with AI help. This isn't a judgement about you or your work, and nothing has been flagged.",
+    "sent": "He writes like it's a movie. Things keep moving and the action is freq"
+  },
+  {
+    "status": 200,
+    "guess": "human",
+    "confidence": 0.8741,
+    "model_score": 0.1959,
+    "style_score": 0.0208,
+    "label": "We think this was probably written by a person.",
+    "sent": "I regularly DNF books when the writing itself sucks. Iron Widow, for e"
+  }
+]
+```
+
+*Criterion 2* — `run_eval.py::main`, scenario "c2 clear AI and human", trial
+1: the highest-scoring AI text, and the human text that scored highest
+(combined 0.534, a real comment the model signal read as AI-like at 0.83):
+
+```json
+[
+  {
+    "status": 200,
+    "guess": "ai",
+    "confidence": 0.8161,
+    "model_score": 0.9377,
+    "style_score": 0.6337,
+    "label": "Our checks found patterns that often show up in AI-generated text. Automated checks can be wrong, especially on plain, simple writing. If you wrote this yourself, you can ask a person to review it.",
+    "sent": "Regular physical activity plays a vital role in maintaining overall he"
+  },
+  {
+    "status": 200,
+    "guess": "unsure",
+    "confidence": 0.9328,
+    "model_score": 0.8287,
+    "style_score": 0.1749,
+    "label": "We can't tell whether this was written by a person or with AI help. This isn't a judgement about you or your work, and nothing has been flagged.",
+    "sent": "I don't care how many books you've read this year.That goes for any bo"
+  }
+]
+```
+
+*Criterion 3* — `run_eval.py::main`, scenario "c3 lightly edited AI", trial
+1, two of the five: one edited text still caught as AI, one pushed into
+unsure:
+
+```json
+[
+  {
+    "status": 200,
+    "guess": "ai",
+    "confidence": 0.7332,
+    "model_score": 0.825,
+    "style_score": 0.5955,
+    "label": "Our checks found patterns that often show up in AI-generated text. Automated checks can be wrong, especially on plain, simple writing. If you wrote this yourself, you can ask a person to review it.",
+    "sent": "Reading a lot is good for you in more ways than people think. It build"
+  },
+  {
+    "status": 200,
+    "guess": "unsure",
+    "confidence": 0.7394,
+    "model_score": 0.5366,
+    "style_score": 0.1194,
+    "label": "We can't tell whether this was written by a person or with AI help. This isn't a judgement about you or your work, and nothing has been flagged.",
+    "sent": "Managing your time well matters, especially when everything moves this"
+  }
+]
+```
+
+*Criterion 4* — `run_checks.py::appeal_trial`,
+`results/checks_2026-11-01_1320_before.md`, trial 1, one real appeal and one
+made-up id:
+
+```json
+{
+  "real_passed": "5/5",
+  "fake_passed": "3/3",
+  "real": [
+    {
+      "content_id": "99914233-2d26-41cc-845f-accc638ea078",
+      "status": 200,
+      "response": {
+        "content_id": "99914233-2d26-41cc-845f-accc638ea078",
+        "message": "Thanks. Your appeal is recorded and a person will review this submission.",
+        "status": "under_review"
+      },
+      "decision_still_logged": true,
+      "under_review_after_decision": true
+    }
+  ],
+  "fake": [
+    {
+      "content_id": "made-up-86ee4e53-1ceb-4653-a112-b1baff5c20e6",
+      "status": 404,
+      "response": {
+        "error": "unknown_content_id",
+        "message": "We have no submission with that content_id."
+      },
+      "under_review_entries": 0
+    }
+  ]
+}
+```
+
+*Criterion 5* — `run_eval.py::main`, scenario "c5 bad input", trial 1 (five
+cases):
+
+```json
+[
+  {"status": 400, "guess": null, "confidence": null, "model_score": null, "style_score": null, "label": null, "sent": "{\"creator_id\": \"eval_bad_missing\"}"},
+  {"status": 400, "guess": null, "confidence": null, "model_score": null, "style_score": null, "label": null, "sent": "(empty text)"},
+  {"status": 400, "guess": null, "confidence": null, "model_score": null, "style_score": null, "label": null, "sent": "    "},
+  {"status": 400, "guess": null, "confidence": null, "model_score": null, "style_score": null, "label": null, "sent": "Hello"},
+  {"status": 413, "guess": null, "confidence": null, "model_score": null, "style_score": null, "label": null, "sent": "word word word word word word word word word word word word word word "}
+]
+```
+
+…the sixth case, from `run_checks.py::non_object_trial`, trial 1:
+
+```json
+{
+  "status": 400,
+  "response": {
+    "error": "invalid_json",
+    "message": "Send a JSON object with 'text' and 'creator_id'."
+  },
+  "rejected_entry": {
+    "timestamp": "2026-11-01T18:20:37+00:00",
+    "creator_id": "unknown",
+    "event": "rejected",
+    "status": "rejected",
+    "reason": "invalid_json"
+  }
+}
+```
+
+…and the log check, from `run_checks.py::bad_input_log_counts`, which counts
+`rejected` entries with the matching reason for each of the five, across all
+three trials:
+
+```json
+{
+  "eval_bad_missing": 3,
+  "eval_bad_empty": 3,
+  "eval_bad_space": 3,
+  "eval_bad_oneword": 3,
+  "eval_bad_huge": 3
+}
 ```
 
 **Diagnoses**
