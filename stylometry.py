@@ -64,8 +64,13 @@ def sentence_length_spread(text: str) -> float:
     `stdev` raises on fewer than two values. Decide what that should return
     before the attack set decides for you.
     """
-    # TODO: replace this
-    return 0.0
+    # Coefficient of variation of sentence lengths in words. Higher = lumpier =
+    # more human. One sentence has no spread, so it reads as fully even (0.0).
+    lengths = [len(words(s)) for s in sentences(text)]
+    lengths = [n for n in lengths if n]
+    if len(lengths) < 2:
+        return 0.0
+    return statistics.stdev(lengths) / statistics.mean(lengths)
 
 
 def type_token_ratio(text: str) -> float:
@@ -80,8 +85,10 @@ def type_token_ratio(text: str) -> float:
     directly comparable on it, and if your test inputs vary a lot in length,
     that alone can look like a signal.
     """
-    # TODO: replace this
-    return 0.0
+    tokens = words(text)
+    if not tokens:
+        return 0.0
+    return len(set(tokens)) / len(tokens)
 
 
 def punctuation_density(text: str) -> float:
@@ -94,8 +101,15 @@ def punctuation_density(text: str) -> float:
         more interesting than full stops, because they vary more between
         writers.
     """
-    # TODO: replace this
-    return 0.0
+    # Only the punctuation that varies between writers: semicolons, colons,
+    # dashes, brackets. Commas are left out: AI lists are full of them.
+    # Per word, so length doesn't decide it.
+    tokens = words(text)
+    if not tokens:
+        return 0.0
+    # Hyphens only count when spaced (" - "), so "work-life" isn't punctuation.
+    marks = re.findall(r"[;:()—–]|\s-\s", text)
+    return len(marks) / len(tokens)
 
 
 # ── Combining them ───────────────────────────────────────────────────────────
@@ -122,8 +136,19 @@ def style_signal(text: str) -> float:
     you trust it. Plain and ordinary, not formal: formal prose reads as *human*
     to signal one, and it is plain writing that gets accused.
     """
-    # TODO: replace this
-    return 0.5
+    # Each measure is flipped and scaled onto 0-1, where 1 = AI-like.
+    #   spread: 0 (every sentence the same length) -> 1, 0.6 or more -> 0
+    #   type-token ratio: 0.5 or less -> 1, 0.9 or more -> 0
+    #   punctuation: none -> 1, 0.03 marks per word or more -> 0
+    # Then a plain average, so no one measure wins by default.
+    spread_ai = _clamp(1 - sentence_length_spread(text) / 0.6)
+    ttr_ai = _clamp((0.9 - type_token_ratio(text)) / 0.4)
+    punct_ai = _clamp(1 - punctuation_density(text) / 0.03)
+    return round((spread_ai + ttr_ai + punct_ai) / 3, 4)
+
+
+def _clamp(value: float) -> float:
+    return min(max(value, 0.0), 1.0)
 
 
 if __name__ == "__main__":

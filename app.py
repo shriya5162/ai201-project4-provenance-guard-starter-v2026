@@ -30,6 +30,8 @@ from flask import Flask, jsonify, request
 
 import audit
 import config
+import scoring
+import stylometry
 
 app = Flask(__name__)
 
@@ -151,7 +153,7 @@ def health():
 # ── YOU BUILD THIS ────────────────────────────────────────────────────────────
 
 @app.post("/submit")
-# @limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
+@limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
 def submit():
     """
     Take a piece of text, decide about it, log the decision, answer.
@@ -227,18 +229,20 @@ def submit():
         return _reject(creator_id, "detector_unavailable",
                        "The detector model isn't available right now.", status=503)
 
-    content_id = str(uuid.uuid4())
+    style_score = stylometry.style_signal(text)
+    combined_score = round(scoring.combine_signals(model_score, style_score), 4)
+    guess, label = scoring.score_to_label(combined_score)
+    confidence = _confidence(guess, combined_score)
 
-    # Placeholders until Milestones 4 and 5 add the second signal and the label.
-    guess = "unsure"
-    confidence = None
-    label = "PLACEHOLDER — label comes in Milestone 5."
+    content_id = str(uuid.uuid4())
 
     audit.log_decision(
         content_id=content_id,
         creator_id=creator_id,
         guess=guess,
         model_score=model_score,
+        style_score=style_score,
+        combined_score=combined_score,
         label=label,
         status="decided",
     )
@@ -249,9 +253,21 @@ def submit():
         "confidence": confidence,
         "label": label,
         "model_score": model_score,
-        "style_score": None,
+        "style_score": style_score,
+        "combined_score": combined_score,
         "status": "decided",
     })
+
+
+def _confidence(guess, combined_score):
+    """How sure we are of the guess itself, not how AI-like the text is."""
+    if guess == "ai":
+        value = combined_score
+    elif guess == "human":
+        value = 1 - combined_score
+    else:
+        value = 1 - 2 * abs(combined_score - 0.5)
+    return round(value, 4)
 
 
 def _reject(creator_id, error, message, status=400):
@@ -280,14 +296,39 @@ def appeal():
     to the person on the other end. It's the only thing standing between a
     wrong accusation and nothing at all.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
 
-    # TODO: delete this and build the route.
+    content_id = payload.get("content_id")
+    if not isinstance(content_id, str) or not content_id.strip():
+        return jsonify({"error": "missing_content_id",
+                        "message": "Include the 'content_id' from your submission."}), 400
+    reasoning = payload.get("reasoning")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return jsonify({"error": "missing_reasoning",
+                        "message": "Tell us why you think the result is wrong."}), 400
+
+    entries = audit.entries_for(content_id)
+    decision = next((e for e in entries if e.get("status") == "decided"), None)
+    if decision is None:
+        return jsonify({"error": "unknown_content_id",
+                        "message": "We have no submission with that content_id."}), 404
+    if any(e.get("event") == "appeal" for e in entries):
+        return jsonify({"error": "already_under_review",
+                        "message": "This submission is already being reviewed."}), 409
+
+    # The creator comes from the original decision, not the request, so nobody
+    # can appeal under someone else's name.
+    audit.log_appeal(content_id=content_id, creator_id=decision["creator_id"],
+                     reasoning=reasoning)
+
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal isn't built yet — see the TODO in app.py.",
-        "you_sent": payload,
-    }), 501
+        "content_id": content_id,
+        "status": "under_review",
+        "message": "Thanks. Your appeal is recorded and a person will "
+                   "review this submission.",
+    })
 
 
 # ── Already works ─────────────────────────────────────────────────────────────

@@ -235,18 +235,57 @@ writer, because the two signals make the same mistake on the same text.
 <!-- Write the rule in words, then give the numbers. What happens when the two
      signals disagree? -->
 
-**The rule:**
+**The rule:** a weighted average that leans on the model signal, because it
+separated my test inputs better than the style signal did. If the two signals
+are far apart, the result is pulled halfway toward 0.5. Two methods
+disagreeing is uncertainty, so a big split should land in "unsure", not in a
+confident verdict.
 
-**The numbers:**
+**The numbers:** `0.6 × model_score + 0.4 × style_score`. If
+`|model_score − style_score| ≥ 0.5`, the score becomes `(score + 0.5) / 2`.
+The weights and the 0.5 gap are in `config.py`.
 
 **Where it lives:** `scoring.py::combine_signals`
 
 <!-- ⚠️ The grader checks your code against that line. If your rule lives
      somewhere else, say where. -->
 
-**A case where my two signals split, and what my rule does with it:**
+**How my style signal works** (`stylometry.py::style_signal`): three measures,
+each flipped and scaled onto 0–1 (1 = AI-like), then averaged equally.
+- **Sentence-length spread** (std ÷ mean of words per sentence): 0 → 1, and 0.6 or more → 0.
+- **Type-token ratio:** 0.5 or less → 1, and 0.9 or more → 0.
+- **Punctuation:** semicolons, colons, dashes and brackets per word. None → 1, and 0.03 or more → 0.
 
+I left commas out of the punctuation count after my first version read the
+clearly-AI text as human: AI lists are full of commas.
 
+**Both signals on the four calibration inputs, plus plain human writing:**
+
+| Input | model_score | style_score | combined | Label |
+|---|---|---|---|---|
+| Clearly AI | 0.903 | 0.509 | 0.746 | ai |
+| Clearly human | 0.244 | 0.333 | 0.280 | human |
+| Formal human | 0.629 | 0.233 | 0.470 | unsure |
+| Lightly edited AI | 0.835 | 0.562 | 0.726 | ai |
+| Plain human | 0.900 | 0.617 | 0.787 | **ai (false positive)** |
+
+**A case where my two signals split, and what my rule does with it:** the
+formal human text, a committee memo full of long, clause-heavy sentences. The
+model signal leaned AI (0.63), because formal phrasing is predictable. The
+style signal said human (0.23), because the sentence lengths vary and it uses
+a colon. The weighted average puts it at 0.47, which is unsure. That's the
+right outcome for a split: no accusation, and no false reassurance either.
+The gap is 0.40, so the extra pull toward 0.5 didn't trigger. It's there for
+bigger splits.
+
+**What it can't fix:** plain human writing. Both signals read short, even
+sentences and common words as AI, so they agree, and agreement is exactly
+what the disagreement rule can't catch. This is the false positive from
+Milestone 1, and it's why the AI label points to the appeal.
+
+**Smaller findings:** at these lengths (40–60 words), type-token ratio comes
+out 0.78–0.92 for everything, so it barely discriminates. Sentence-length
+spread does most of the style signal's work.
 
 ---
 
@@ -259,16 +298,25 @@ writer, because the two signals make the same mistake on the same text.
 
 | Label | Score range | The exact text a reader sees |
 |---|---|---|
-| high-confidence human |  |  |
-| unsure |  |  |
-| high-confidence AI |  |  |
+| high-confidence human | 0.00 – 0.35 | We think this was probably written by a person. |
+| unsure | 0.35 – 0.70 | We can't tell whether this was written by a person or with AI help. This isn't a judgement about you or your work, and nothing has been flagged. |
+| high-confidence AI | 0.70 – 1.00 | Our checks found patterns that often show up in AI-generated text. Automated checks can be wrong, especially on plain, simple writing. If you wrote this yourself, you can ask a person to review it. |
+
+The text lives in `scoring.py` (`LABEL_HUMAN`, `LABEL_UNSURE`, `LABEL_AI`) and
+the thresholds in `config.py`. I moved the AI threshold up from 0.65 to 0.70
+so the AI label needs more evidence. All three labels are reachable: see the
+table above.
 
 **Why I worded the "unsure" one this way:**
 <!-- It's the hardest of the three. It has to admit uncertainty without
      sounding like an accusation, because the person reading it may well have
      written every word themselves. -->
-
-
+The person reading it probably wrote every word, so it says plainly that the
+service is the one that doesn't know, not that the writer is under suspicion.
+"Nothing has been flagged" answers the first thing they'll worry about. I
+also wrote the AI label as what the checks *found*, not what the writer
+*did*, and it admits the checks can be wrong and says how to appeal, because
+plain writers land there.
 
 ---
 
@@ -284,29 +332,29 @@ writer, because the two signals make the same mistake on the same text.
      two off the response, so leaving them out costs you next unit's
      diagnostics. -->
 
-<!-- Milestone 3 run: one signal wired in. confidence and label are still
-     placeholders, and style_score is null until Milestone 4. This run used
-     port 5001 because a stale server was holding 5000. -->
+This is plain human writing, and the service gets it wrong. That makes it the
+right one to appeal.
 
 ```bash
-$ curl -X POST http://127.0.0.1:5001/submit \
+$ curl -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
-  -d '{"text": "My grandmother kept her buttons in a Danish cookie tin, which meant every Christmas someone opened it hoping for butter cookies and got a fistful of mismatched coat toggles instead. She thought this was the funniest thing in the world.", "creator_id": "shriya"}'
+  -d '{"text": "I started running last year. At first it was hard. I could only run for five minutes. Now I can run for thirty minutes without stopping. I run three times a week. It makes me feel good and I sleep better.", "creator_id": "shriya"}'
 ```
 
 ```json
 {
-    "confidence": null,
-    "content_id": "f616314e-4d12-44e4-9fc9-9081d5568257",
-    "guess": "unsure",
-    "label": "PLACEHOLDER — label comes in Milestone 5.",
-    "model_score": 0.216,
+    "combined_score": 0.7868,
+    "confidence": 0.7868,
+    "content_id": "f9de25dc-8454-4750-98cf-4dae3b2691a4",
+    "guess": "ai",
+    "label": "Our checks found patterns that often show up in AI-generated text. Automated checks can be wrong, especially on plain, simple writing. If you wrote this yourself, you can ask a person to review it.",
+    "model_score": 0.9,
     "status": "decided",
-    "style_score": null
+    "style_score": 0.6171
 }
 ```
 
-**A refused submission** (no `text`)
+**A refused submission** (no `text`, from the Milestone 3 run on port 5001)
 
 ```bash
 $ curl -X POST http://127.0.0.1:5001/submit \
@@ -321,12 +369,12 @@ $ curl -X POST http://127.0.0.1:5001/submit \
 }
 ```
 
-**Signal one on its own, before wiring** (`python detector.py "..."`)
+**Signal one on its own, before wiring** (`python detector.py "..."`, Milestone 3)
 
 | Text | Perplexity | `model_signal` |
 |---|---|---|
 | Sure AI: "In today's fast-paced world, effective time management is essential for achieving success…" | 11.1 | 0.904 |
-| Sure human: the cookie-tin paragraph above, plus one more sentence | 91.3 | 0.244 |
+| Sure human: the cookie-tin paragraph, "My grandmother kept her buttons in a Danish cookie tin…" | 91.3 | 0.244 |
 | In between: plain human writing, "I started running last year. At first it was hard. I could only run for five minutes…" | 11.7 | 0.896 |
 
 The plain human paragraph scored almost exactly the same as the AI one. That
@@ -338,17 +386,27 @@ sentences and common words are as predictable to GPT-2 as machine text.
 ```bash
 $ curl -X POST http://127.0.0.1:5000/appeal \
   -H "Content-Type: application/json" \
-  -d '{"content_id": "...", "reasoning": "..."}'
+  -d '{"content_id": "f9de25dc-8454-4750-98cf-4dae3b2691a4", "reasoning": "I wrote this myself. I keep my sentences short because English is my second language."}'
 ```
 
 ```json
-
+{
+    "content_id": "f9de25dc-8454-4750-98cf-4dae3b2691a4",
+    "message": "Thanks. Your appeal is recorded and a person will review this submission.",
+    "status": "under_review"
+}
 ```
+
+The other appeal cases: a second appeal on the same id returns
+`409 already_under_review`, a made-up id returns `404 unknown_content_id`, and
+a missing reason returns `400 missing_reasoning`.
 
 **What the log shows afterwards**
 
+The original decision stays where it was, and the appeal sits after it.
+
 ```bash
-$ curl "http://127.0.0.1:5001/log?limit=2"
+$ curl "http://127.0.0.1:5000/log?limit=2"
 ```
 
 ```json
@@ -356,22 +414,23 @@ $ curl "http://127.0.0.1:5001/log?limit=2"
     "count": 2,
     "entries": [
         {
-            "combined_score": null,
-            "content_id": "f616314e-4d12-44e4-9fc9-9081d5568257",
+            "combined_score": 0.7868,
+            "content_id": "f9de25dc-8454-4750-98cf-4dae3b2691a4",
             "creator_id": "shriya",
-            "guess": "unsure",
-            "label": "PLACEHOLDER — label comes in Milestone 5.",
-            "model_score": 0.216,
+            "guess": "ai",
+            "label": "Our checks found patterns that often show up in AI-generated text. Automated checks can be wrong, especially on plain, simple writing. If you wrote this yourself, you can ask a person to review it.",
+            "model_score": 0.9,
             "status": "decided",
-            "style_score": null,
-            "timestamp": "2026-10-26T16:09:34+00:00"
+            "style_score": 0.6171,
+            "timestamp": "2026-11-01T17:32:33+00:00"
         },
         {
+            "content_id": "f9de25dc-8454-4750-98cf-4dae3b2691a4",
             "creator_id": "shriya",
-            "event": "rejected",
-            "reason": "missing_text",
-            "status": "rejected",
-            "timestamp": "2026-10-26T16:09:34+00:00"
+            "event": "appeal",
+            "reasoning": "I wrote this myself. I keep my sentences short because English is my second language.",
+            "status": "under_review",
+            "timestamp": "2026-11-01T17:32:34+00:00"
         }
     ]
 }
@@ -399,24 +458,50 @@ $ curl "http://127.0.0.1:5001/log?limit=2"
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 5 per minute, 50 per day
 
 **Why those numbers and not others:**
 <!-- Think about two people: a real writer submitting their own work a few
      times an hour, and a script sending a thousand variations to map your
      thresholds. Your numbers have to be liveable for the first and hostile to
      the second. -->
+A real writer submits a finished piece, maybe re-submits it after an edit or
+two, and moves on. Five in one minute already covers someone fixing typos and
+resubmitting quickly, and 50 a day is more than a heavy day of posting. A
+script mapping my thresholds needs hundreds of near-identical variations to
+find where the labels flip. At 50 a day that takes weeks per creator instead
+of minutes, and every attempt is logged. The default of 10 a minute and 200 a
+day would let a script collect 200 data points a day, which is enough to start
+mapping the bands.
 
 **What a caller counts as:** <!-- per address, or per creator_id? They fail
 differently — one script can look like a thousand callers, and one household
 can look like one. -->
+Per `creator_id`, falling back to the caller's address when the request has no
+usable `creator_id` (`app.py::rate_limit_key`). This is fair to people
+sharing one network, like a household or a school, because each writer gets
+their own allowance. The weakness is that `creator_id` is just a string the
+caller sends, so a script can make up a new one for every request and never
+hit the limit. That only works because nothing ties `creator_id` to a real
+account. On a real site, the site would supply the id of the logged-in user.
 
 **The run of status codes when I pushed past it:**
 
 <!-- python run_attacks.py --flood 15 -->
 
 ```
+$ python run_attacks.py --flood 15
+15 submissions as 'flood_tester' against http://127.0.0.1:5000
 
+200 200 200 200 200 429 429 429 429 429 429 429 429 429 429
+
+10 of 15 were rate limited.
+```
+
+Each 429 left a trace in the audit log:
+
+```json
+{"timestamp": "2026-11-01T17:26:26+00:00", "creator_id": "flood_tester", "event": "rejected", "status": "rejected", "reason": "rate_limited", "limit": "5 per 1 minute"}
 ```
 
 ---
