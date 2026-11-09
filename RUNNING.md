@@ -1,6 +1,98 @@
 # Running Provenance Guard
 
-Everything about how the starter works.
+## Run it from a fresh clone (unit 9 — Path B, local with logs)
+
+This service runs locally. It doesn't run hosted, because GPT-2 plus `torch`
+need more memory than a free host's 512 MB (the arithmetic is under "This
+project will not fit a free host" below).
+
+**What the machine needs**
+
+| | |
+|---|---|
+| Python | 3.11, 3.12 or 3.13. Not 3.14. Tested on 3.11.0, Windows 11 |
+| Packages | `requirements.txt`. Tested with Flask 3.1.3, Flask-Limiter 3.12, transformers 4.57.6, torch 2.14.1 and 2.15.0 (CPU), requests 2.34.2, certifi 2026.10.23 |
+| Model | `gpt2`, downloaded automatically on first use to `~/.cache/huggingface/hub/models--gpt2`. **526 MB on disk** |
+| Disk | About 2 GB free: about 1.3 GB for the virtual environment (mostly `torch`) plus the model |
+| Network | Only for the one-time install and model download. After that it runs offline |
+
+> **Windows: clone into a short folder path.** `torch` installs header files
+> nested about 150 characters deep. If the repo's folder path is long, the
+> full path goes over Windows' 260-character limit and `pip install` fails
+> with `OSError: [Errno 2] No such file or directory: ...\torch\include\...`.
+> Keep the repo path under about 90 characters (for example
+> `C:\Users\<you>\pg`), or turn on Windows long-path support. I hit this the
+> first time I followed these instructions from a fresh clone.
+
+**One-time setup** (from the repo folder):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python detector.py                 # downloads the model once and scores a sample
+```
+
+**The start command:**
+
+```bash
+python app.py
+```
+
+It serves on `http://127.0.0.1:5000`. Check it's up from a second terminal
+(with the venv activated there too):
+
+```bash
+curl http://127.0.0.1:5000/health
+```
+
+Then send a submission. On Windows, use `curl.exe` on one line.
+
+```bash
+curl -X POST http://127.0.0.1:5000/submit -H "Content-Type: application/json" -d '{"text": "I started running last year. At first it was hard. Now I can run for thirty minutes.", "creator_id": "me"}'
+```
+
+**What to expect:**
+- **The first submission is slow.** It waits for GPT-2 to load into memory:
+  about 25–40 seconds normally, and up to 90 on the first run after a reboot.
+  Later submissions take under a second.
+- **`GET /health` shows the model's state:** `detector_loaded`, plus
+  `detector_load_ms` once the model has loaded.
+
+**Where the record goes:** every request to `/submit` and `/appeal` appends one
+JSON line to `logs/audit.jsonl`, including refused ones and crashes. Read it
+back with:
+
+```bash
+curl "http://127.0.0.1:5000/log?limit=10"
+```
+
+| Field | On | Meaning |
+|---|---|---|
+| `timestamp` | every entry | UTC time the entry was written |
+| `endpoint` | every entry | `submit` or `appeal` |
+| `http_status` | every entry | What the caller got back |
+| `duration_ms` | every entry | Time from the request arriving to the response being ready |
+| `creator_id` | every entry | Who sent it (`unknown` if it couldn't be read) |
+| `content_id` | decisions, appeals | The submission's id |
+| `text_chars` | submissions | Length of the text that came in. The text itself isn't logged |
+| `model_score`, `style_score`, `combined_score`, `guess`, `label` | decisions | What came out |
+| `cold_start` | decisions | `true` if this request waited for the model to load |
+| `status` | every entry | `decided`, `under_review` or `rejected` |
+| `reason`, `error` | refusals, crashes | Why it was refused, and the exception for a 500 |
+
+**Optional:**
+- **Flask's debug reloader.** `AI201_DEBUG=0 python app.py` turns it off (in
+  PowerShell: `$env:AI201_DEBUG="0"; python app.py`). The service behaves the
+  same either way.
+- **A different port.** Use `PORT=5001`.
+
+`gunicorn` (below) is for Linux and macOS hosts only. It doesn't run on
+Windows.
+
+---
+
+Everything below is about how the starter works.
 
 This is a **web service**. It runs on your machine and you talk to it with
 `curl` from another terminal. If you've not built a backend before, that's

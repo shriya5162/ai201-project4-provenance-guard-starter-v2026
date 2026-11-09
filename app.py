@@ -28,6 +28,7 @@ import time
 import uuid
 
 from flask import Flask, g, jsonify, request
+from werkzeug.exceptions import HTTPException
 
 import audit
 import config
@@ -49,6 +50,26 @@ def _start_clock():
 def _elapsed_ms():
     started = g.get("started")
     return round((time.perf_counter() - started) * 1000, 1) if started else None
+
+
+@app.errorhandler(Exception)
+def _crashed(exc):
+    """
+    A request that blew up still leaves a record. Without this, a crash shows
+    up only as a missing log entry and a 500 page.
+    """
+    if isinstance(exc, HTTPException):
+        return exc
+    audit.log_rejection(
+        creator_id="unknown",
+        reason="internal_error",
+        error=f"{type(exc).__name__}: {exc}",
+        endpoint=request.path.lstrip("/"),
+        http_status=500,
+        duration_ms=_elapsed_ms(),
+    )
+    return jsonify({"error": "internal_error",
+                    "message": "Something went wrong on our side."}), 500
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────

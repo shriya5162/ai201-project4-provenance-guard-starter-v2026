@@ -921,6 +921,141 @@ measurement what a cold request and a warm request each cost.
 a `duration_ms` field to the route and the log, timing the model load, and
 writing `RUNNING.md`. Everything else this unit is measurement and write-up.
 
+---
+
+## Run Path
+
+**Path B — local with logs.** The service runs on my machine, started by one
+command from a fresh clone: `python app.py`. The full instructions, what the
+environment needs and what each log field means are at the top of
+[RUNNING.md](RUNNING.md). It isn't hosted because GPT-2 plus `torch` need more
+memory than a free tier's 512 MB before a single request arrives.
+
+**Tested on myself from a clean clone:** I cloned the repo into a new folder and followed RUNNING.md exactly.
+
+**It failed the first time.** My first clone was in a long folder path, and
+`pip install` failed with `OSError: [Errno 2] No such file or directory` on a
+`torch` header file: the full path went over Windows' 260-character limit. My
+own repo folder is just short enough, which is why I'd never hit it. I added a
+warning to RUNNING.md, re-cloned to `C:\Users\12675\pgclean`, and then every
+step worked:
+
+| Step | Result |
+|---|---|
+| `python -m venv .venv` and `pip install -r requirements.txt` | Worked, 6 min 45 s |
+| `python detector.py` | Scored the sample in 29 s (model already in the cache) |
+| `python app.py` (on `PORT=5002`, since my main copy was on 5000) | Started |
+| `GET /health` | `ok: true`, `detector_loaded: false` |
+| First `POST /submit` | 200 in 18.3 s, logged with `cold_start: true` and every timing field |
+
+**Second finding:** the fresh install got **torch 2.15.0**, not the 2.14.1 in
+my main environment, because `requirements.txt` pins ranges, not exact
+versions. The service behaved the same, and RUNNING.md now lists both versions
+as tested.
+
+A machine that has never downloaded GPT-2 would also wait for the 526 MB
+download in the `python detector.py` step. My test reused the model already on
+this machine.
+
+---
+
+## Instrumentation
+
+Every request to `/submit` and `/appeal` appends one JSON line to
+`logs/audit.jsonl`. That includes requests the service refuses (400, 404, 409,
+413, 429, 503) and requests that crash (500).
+
+- **What came in:** `creator_id`, `endpoint`, `text_chars`, and for appeals `content_id`.
+- **What came out:** `http_status`, the scores, `guess`, `label`, `status`, or `reason` for a refusal.
+- **How long it took:** `duration_ms`, measured from the request arriving to the response being ready.
+- **Whether it was a cold start:** `cold_start` is `true` on the request that waited for the model to load.
+
+`GET /health` also reports `detector_load_ms`, the one-time load.
+
+I log the text's length, not the text itself. The log should hold enough to
+reconstruct what the service did, not a copy of people's writing.
+
+**Code:**
+- `app.py::_start_clock` starts the timer on every request. It's registered
+  before the rate limiter, so a 429 gets timed too.
+- `app.py::_elapsed_ms` reads the clock.
+- `app.py::_crashed` logs any unexpected exception.
+- `detector.py::_load` times the model load.
+
+**Ten entries from real sessions (2026-11-09):**
+
+```json
+{"timestamp": "2026-11-09T01:39:37+00:00", "content_id": "b6f9cf7b-60d8-4c10-a099-e988632dd13e", "creator_id": "u9_cost_cold", "guess": "unsure", "model_score": 0.7412, "style_score": 0.6271, "combined_score": 0.6956, "label": "We can't tell whether this was written by a person or with AI help. This isn't a judgement about you or your work, and nothing has been flagged.", "status": "decided", "endpoint": "submit", "http_status": 200, "text_chars": 425, "cold_start": true, "duration_ms": 57363.0}
+{"timestamp": "2026-11-09T01:39:37+00:00", "content_id": "59f8d306-3951-464b-9a20-1d3d36f99ecb", "creator_id": "u9_cost_1", "guess": "unsure", "model_score": 0.7412, "style_score": 0.6271, "combined_score": 0.6956, "label": "We can't tell whether this was written by a person or with AI help. This isn't a judgement about you or your work, and nothing has been flagged.", "status": "decided", "endpoint": "submit", "http_status": 200, "text_chars": 425, "cold_start": false, "duration_ms": 324.3}
+{"timestamp": "2026-11-09T01:39:40+00:00", "content_id": "980ae8c4-0acc-449b-a0ac-a4727a32b9af", "creator_id": "u9_cost_9", "guess": "unsure", "model_score": 0.8287, "style_score": 0.1749, "combined_score": 0.5336, "label": "We can't tell whether this was written by a person or with AI help. This isn't a judgement about you or your work, and nothing has been flagged.", "status": "decided", "endpoint": "submit", "http_status": 200, "text_chars": 390, "cold_start": false, "duration_ms": 515.1}
+{"timestamp": "2026-11-09T01:32:11+00:00", "creator_id": "u9_demo", "event": "rejected", "status": "rejected", "reason": "missing_text", "endpoint": "submit", "http_status": 400, "duration_ms": 3.7}
+{"timestamp": "2026-11-09T01:32:15+00:00", "creator_id": "u9_flood", "event": "rejected", "status": "rejected", "reason": "rate_limited", "limit": "5 per 1 minute", "endpoint": "submit", "http_status": 429, "duration_ms": 2.3}
+{"timestamp": "2026-11-09T01:32:11+00:00", "content_id": "f46c0d39-7f52-4ef1-a73b-9c5d81507158", "creator_id": "u9_demo", "event": "appeal", "status": "under_review", "reasoning": "mine", "endpoint": "appeal", "http_status": 200, "duration_ms": 40.7}
+{"timestamp": "2026-11-09T01:32:11+00:00", "creator_id": "u9_demo", "event": "rejected", "status": "rejected", "reason": "already_under_review", "endpoint": "appeal", "http_status": 409, "duration_ms": 40.4, "content_id": "f46c0d39-7f52-4ef1-a73b-9c5d81507158"}
+{"timestamp": "2026-11-09T01:32:12+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "unknown_content_id", "endpoint": "appeal", "http_status": 404, "duration_ms": 33.7, "content_id": "nope"}
+{"timestamp": "2026-11-09T01:32:12+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "missing_reasoning", "endpoint": "appeal", "http_status": 400, "duration_ms": 0.8, "content_id": "nope"}
+{"timestamp": "2026-11-09T01:39:55+00:00", "creator_id": "unknown", "event": "rejected", "status": "rejected", "reason": "internal_error", "error": "RuntimeError: simulated detector crash", "endpoint": "submit", "http_status": 500, "duration_ms": 1.4}
+```
+
+What they show, in order:
+- **Entry 1:** a cold start (57 s).
+- **Entries 2–3:** two warm requests (0.3–0.5 s).
+- **Entries 4–5:** a refused submission and a rate-limited one, both answered in a few milliseconds.
+- **Entries 6–9:** each appeal outcome.
+- **Entry 10:** a crash.
+
+I produced the crash on purpose with Flask's test client, by making the
+detector raise an error. It shows a 500 now leaves a record instead of an
+absence. Its `creator_id` is `unknown` because the crash handler doesn't see
+the request's fields.
+
+**Something the log already shows:** an appeal takes about 40 ms, even when
+it's refused for a reason found in the log. That's about 10 times a refused
+submission, which doesn't touch the log before answering. `/appeal` calls
+`audit.entries_for`, which reads the whole of `logs/audit.jsonl`, so appeals
+will get slower as the log grows.
+
+---
+
+## What It Costs
+
+There's no API bill. The model runs locally, so **the cost of a run is time
+on my CPU**. I measured it as wall-clock time per request, from the
+`duration_ms` the service logs.
+
+**Machine:** Windows 11, CPU only (torch 2.14.1+cpu), Python 3.11.0, with
+nothing else using the service.
+
+**Method:**
+1. Restarted the service, so the model wasn't loaded.
+2. Sent one submission (the cold request).
+3. Sent ten more, each a different text of 350–435 characters: the five
+   AI-generated texts and five human r/books comments from `scenarios.py`.
+4. Read each request's `duration_ms` back from `logs/audit.jsonl`, matched by
+   `content_id`, and took `detector_load_ms` from `/health`.
+
+The client-side time was within 8 ms of the logged time on every request.
+
+| What | Measured |
+|---|---|
+| **One warm request (mean of 10)** | **336.8 ms** |
+| Median / min / max / stdev | 325.6 / 279.8 / 515.1 / 67.1 ms |
+| One cold request (the first after a restart) | 57,363 ms |
+| …of which loading the model | 48,558 ms |
+| A refused request (400 / 429) | 2–4 ms |
+
+**What that means:**
+- **A warm submission costs about a third of a second** of one CPU.
+- **Each restart costs about a minute** before the first answer, and almost
+  all of that is loading GPT-2.
+- **The cold number varies a lot from run to run.** The same load took
+  23.3 s in one session and 91 s on the first run after a reboot. This
+  measurement (48.6 s) ran while a `git clone` and a disk-size check were
+  using the same disk.
+- **Warm requests barely depend on length** in this range, because the
+  detector reads at most 400 tokens of any text.
+
+
 <!-- ═════════════════════════════════════════════════════════════════════
 
      SUBMISSION CHECKLIST — unit 7
