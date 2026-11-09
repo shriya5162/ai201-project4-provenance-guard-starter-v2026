@@ -156,3 +156,98 @@ never be found afterwards.
      A number you missed stays where it is, gets diagnosed, and gets a fix
      attempted. That's where the points are.
      ───────────────────────────────────────────────────────────────────────── -->
+
+---
+
+# Unit 9 — the extension (Shape A: deploy and instrument)
+
+Five more criteria, about the timing and logging I added in unit 9 and the
+run path in RUNNING.md. The unit 7 criteria above are unchanged.
+
+Each is tested in three trials, with the service restarted before each trial.
+I wrote these after Milestone 3's cost measurement (warm requests 280–515 ms
+over 10 runs; cold starts of 18 s, 23 s, 57 s and 91 s across four sessions),
+and before running any test against them.
+
+---
+
+## 6. Every request leaves a timed record
+
+Of 12 requests covering every path (a scored submission; a missing-text 400;
+an empty-text 400; a too-short 400; a too-long 413; a non-object-body 400; a
+rate-limited 429; an accepted appeal; and appeals answered 400, 404 and 409;
+plus one simulated crash 500), **12 of 12** add exactly one new entry to
+`logs/audit.jsonl` that has `endpoint`, `http_status` and a numeric
+`duration_ms`, and whose `http_status` matches what the caller received, in
+every trial.
+
+**Why this target:**
+
+The whole extension is "the log answers how long, and for what, without new
+code." One request that leaves no entry, or leaves two, means the log can't be
+trusted to count anything, so anything less than all 12 is a miss. The 12
+cover every branch in the route, because refusals and crashes are where a
+missing record hides an attack.
+
+---
+
+## 7. Warm requests stay fast
+
+After one warm-up request, **at least 19 of 20** submissions of 350–450
+characters have a logged `duration_ms` **under 500 ms**, in every trial.
+
+**Why this target:**
+
+My 10-run measurement averaged 337 ms, but one run took 515 ms, so 500 ms is
+not a target I already clear every time. A writer waiting more than half a
+second after pressing submit starts to notice. 19 of 20 allows one slow
+outlier without letting a slow tail hide behind a good average.
+
+---
+
+## 8. A cold start finishes within a minute
+
+After restarting the service, the first submission returns **200 within
+60 seconds**, and its log entry has `cold_start: true`, in **3 of 3**
+restarts.
+
+**Why this target:**
+
+Every restart makes the next writer wait for GPT-2 to load. I've measured that
+wait at 18 s, 23 s, 57 s and 91 s, so 60 s is a real line. A minute is about
+as long as someone will look at a spinner before assuming the page is broken.
+`cold_start: true` has to be there too, or the log can't tell a slow cold start
+from a slow warm request.
+
+---
+
+## 9. When the model can't load, the service says so quickly and leaves a record
+
+With the detector pointed at a model that doesn't exist
+(`AI201_DETECTOR_MODEL=no-such-model`), **5 of 5** submissions get a **503**
+JSON response (not an HTML error page) **within 10 seconds each**, and **5 of
+5** leave a `rejected` entry with `reason: detector_unavailable` and a
+`duration_ms`, in every trial.
+
+**Why this target:**
+
+This is the bad path. The service retries the load on every request, and a
+missing model means a network lookup that could hang, so this might fail
+slowly, not quickly. 10 seconds is the longest a caller should wait to be told
+"not right now." Every failure has to be logged, or an outage looks like a
+quiet afternoon.
+
+---
+
+## 10. Appeals stay fast as the log grows
+
+With **at least 2,000 entries** in `logs/audit.jsonl`, **5 of 5** accepted
+appeals have a logged `duration_ms` **under 100 ms**, in every trial.
+
+**Why this target:**
+
+My instrumentation showed that an appeal takes about 40 ms with 230 log
+entries, because `/appeal` re-reads the whole log on every call. If that time
+grows with the log, a real site would cross 100 ms within weeks. 2,000 entries
+is about ten times today's log. 100 ms is where an appeal would start to feel
+slower than a submission's refusal (2–4 ms) for no reason the writer can see.
