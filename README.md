@@ -881,6 +881,46 @@ three trials:
 
 
 
+<!-- ═══════════════════════ UNIT 9 — THE EXTENSION ═══════════════════════ -->
+
+---
+
+## The Shape
+
+**System:** Provenance Guard, the AI-text detection service from units 7–8.
+
+**Shape:** A — Deploy and instrument. **Run path:** B — local with logs.
+
+**What I'm adding:** the operational layer around the service as it already
+works. Every request to `/submit` and `/appeal` will record how long it took,
+including the requests it refuses (400, 413, 429), so the log answers "how
+slow, and for what" without new code. The one-time model load at startup gets
+timed separately, because the first request after a restart waits 10–20
+seconds for GPT-2 while later ones take a second or two. `RUNNING.md` becomes
+a single start command, tested from a fresh clone, with the environment it
+needs (Python version, pinned packages, the 550 MB model). I'll measure what
+one request costs in seconds of CPU time, averaged over ten runs. There's no
+API bill, because the model runs locally. It runs locally rather than hosted
+because GPT-2 alone needs more memory than the free tier's 512 MB.
+
+**What I'll claim when it's done:** started from `RUNNING.md` alone, the
+service records the duration of every request it receives, and I can say from
+measurement what a cold request and a warm request each cost.
+
+**Out of scope:**
+- **Hosting it online.** The model doesn't fit the free tier, and getting it
+  to fit would mean changing the detector.
+- **Touching the detector, signals, weights, thresholds or labels.** Those
+  belong to unit 8's improvement. Changing them here would make unit 8's
+  before-and-after impossible to compare, and would make this unit's numbers
+  about two changes instead of one.
+- **New endpoints or a dashboard.** A `GET /metrics` route or a chart would be
+  a second piece of work. The numbers come from reading `logs/audit.jsonl`.
+
+**Size check:** the build is about 45–60 minutes. It means adding a timer and
+a `duration_ms` field to the route and the log, timing the model load, and
+writing `RUNNING.md`. Everything else this unit is measurement and write-up.
+
 <!-- ═════════════════════════════════════════════════════════════════════
 
      SUBMISSION CHECKLIST — unit 7
