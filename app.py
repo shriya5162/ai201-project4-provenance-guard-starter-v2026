@@ -24,9 +24,10 @@ Routes:
     GET  /health      is the service up, and is the model loaded
 """
 
+import time
 import uuid
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 import audit
 import config
@@ -34,6 +35,20 @@ import scoring
 import stylometry
 
 app = Flask(__name__)
+
+
+# ── Timing — UNIT 9 ───────────────────────────────────────────────────────────
+# Registered before the rate limiter so the clock is already running when a
+# request gets a 429. Every log entry from a request carries how long it took.
+
+@app.before_request
+def _start_clock():
+    g.started = time.perf_counter()
+
+
+def _elapsed_ms():
+    started = g.get("started")
+    return round((time.perf_counter() - started) * 1000, 1) if started else None
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
@@ -109,6 +124,9 @@ if config.RATE_LIMITING_ENABLED:
             creator_id=payload.get("creator_id", "unknown"),
             reason="rate_limited",
             limit=str(exc.description),
+            endpoint=request.path.lstrip("/"),
+            http_status=429,
+            duration_ms=_elapsed_ms(),
         )
         return jsonify({
             "error": "rate_limited",
@@ -145,6 +163,7 @@ def health():
         "ok": True,
         "detector_model": config.DETECTOR_MODEL,
         "detector_loaded": loaded,
+        "detector_load_ms": detector.load_ms,
         "rate_limiting": config.RATE_LIMITING_ENABLED,
         "log_entries": len(audit.read_entries()),
     })
@@ -218,13 +237,18 @@ def submit():
         return _reject(creator_id, "empty_text", "The 'text' field is empty.")
     if len(text) > config.MAX_TEXT_CHARS:
         return _reject(creator_id, "text_too_long",
-                       f"Text is over {config.MAX_TEXT_CHARS:,} characters.", status=413)
+                       f"Text is over {config.MAX_TEXT_CHARS:,} characters.", status=413,
+                       text_chars=len(text))
+
+    # True when this request is the one that pays for loading the model.
+    cold_start = detector._model is None
 
     try:
         model_score = detector.model_signal(text)
     except ValueError:
         return _reject(creator_id, "text_too_short",
-                       "Text is too short to check. Send at least a few sentences.")
+                       "Text is too short to check. Send at least a few sentences.",
+                       text_chars=len(text))
     except detector.DetectorUnavailable:
         return _reject(creator_id, "detector_unavailable",
                        "The detector model isn't available right now.", status=503)
@@ -245,6 +269,11 @@ def submit():
         combined_score=combined_score,
         label=label,
         status="decided",
+        endpoint="submit",
+        http_status=200,
+        text_chars=len(text),
+        cold_start=cold_start,
+        duration_ms=_elapsed_ms(),
     )
 
     return jsonify({
@@ -270,9 +299,10 @@ def _confidence(guess, combined_score):
     return round(value, 4)
 
 
-def _reject(creator_id, error, message, status=400):
+def _reject(creator_id, error, message, status=400, endpoint="submit", **extra):
     """Refuse a request, and leave a trace of the refusal in the audit log."""
-    audit.log_rejection(creator_id=creator_id, reason=error)
+    audit.log_rejection(creator_id=creator_id, reason=error, endpoint=endpoint,
+                        http_status=status, duration_ms=_elapsed_ms(), **extra)
     return jsonify({"error": error, "message": message}), status
 
 
@@ -302,26 +332,30 @@ def appeal():
 
     content_id = payload.get("content_id")
     if not isinstance(content_id, str) or not content_id.strip():
-        return jsonify({"error": "missing_content_id",
-                        "message": "Include the 'content_id' from your submission."}), 400
+        return _reject("unknown", "missing_content_id",
+                       "Include the 'content_id' from your submission.", endpoint="appeal")
     reasoning = payload.get("reasoning")
     if not isinstance(reasoning, str) or not reasoning.strip():
-        return jsonify({"error": "missing_reasoning",
-                        "message": "Tell us why you think the result is wrong."}), 400
+        return _reject("unknown", "missing_reasoning",
+                       "Tell us why you think the result is wrong.", endpoint="appeal",
+                       content_id=content_id)
 
     entries = audit.entries_for(content_id)
     decision = next((e for e in entries if e.get("status") == "decided"), None)
     if decision is None:
-        return jsonify({"error": "unknown_content_id",
-                        "message": "We have no submission with that content_id."}), 404
+        return _reject("unknown", "unknown_content_id",
+                       "We have no submission with that content_id.", status=404,
+                       endpoint="appeal", content_id=content_id)
     if any(e.get("event") == "appeal" for e in entries):
-        return jsonify({"error": "already_under_review",
-                        "message": "This submission is already being reviewed."}), 409
+        return _reject(decision["creator_id"], "already_under_review",
+                       "This submission is already being reviewed.", status=409,
+                       endpoint="appeal", content_id=content_id)
 
     # The creator comes from the original decision, not the request, so nobody
     # can appeal under someone else's name.
     audit.log_appeal(content_id=content_id, creator_id=decision["creator_id"],
-                     reasoning=reasoning)
+                     reasoning=reasoning, endpoint="appeal", http_status=200,
+                     duration_ms=_elapsed_ms())
 
     return jsonify({
         "content_id": content_id,
