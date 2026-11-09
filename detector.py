@@ -42,11 +42,16 @@ for yourself where it lands.
 """
 
 import math
+import time
 
 import config
 
 _model = None
 _tokenizer = None
+
+# How long the one-time model load took, in milliseconds. None until it has
+# happened. The first request after a restart pays this; later ones don't.
+load_ms = None
 
 
 class DetectorUnavailable(RuntimeError):
@@ -55,9 +60,11 @@ class DetectorUnavailable(RuntimeError):
 
 def _load():
     """Load the model once and keep it. First call downloads ~550 MB."""
-    global _model, _tokenizer
+    global _model, _tokenizer, load_ms
     if _model is not None:
         return _model, _tokenizer
+
+    started = time.perf_counter()
 
     try:
         import torch  # noqa: F401
@@ -79,6 +86,7 @@ def _load():
             f"that you have disk space free."
         ) from exc
 
+    load_ms = round((time.perf_counter() - started) * 1000, 1)
     return _model, _tokenizer
 
 
